@@ -549,14 +549,63 @@ class GoogleBusinessAPI {
       console.log('Creating new location for account:', accountName);
       console.log('Location data:', locationData);
       
-      const response = await this.mybusinessaccount.accounts.locations.create({
-        parent: accountName,
-        requestBody: locationData,
-        auth: this.getAuthClient(),
-      });
+      let response;
       
-      console.log('Location created successfully:', response.data);
-      return response.data;
+      // Try My Business API first (legacy)
+      if (this.mybusinessaccount && this.mybusinessaccount.accounts && this.mybusinessaccount.accounts.locations) {
+        try {
+          response = await this.mybusinessaccount.accounts.locations.create({
+            parent: accountName,
+            requestBody: locationData,
+            auth: this.getAuthClient(),
+          });
+          console.log('Location created successfully via My Business API:', response.data);
+          return response.data;
+        } catch (mbError) {
+          console.warn('My Business API failed, trying Business Profile API...', mbError);
+        }
+      }
+      
+      // Fallback to Business Profile API
+      if (this.mybusinessaccount && this.mybusinessaccount.accounts && this.mybusinessaccount.accounts.locations) {
+        // For Business Profile API, we need to use a different structure
+        const businessProfileData = {
+          title: locationData.locationName,
+          categories: {
+            primaryCategory: locationData.primaryCategory,
+            additionalCategories: locationData.categories?.filter(cat => cat.categoryId !== locationData.primaryCategory?.categoryId) || []
+          },
+          storefrontAddress: {
+            addressLines: [locationData.profile?.description || ''],
+            locality: '',
+            administrativeArea: '',
+            postalCode: '',
+            regionCode: ''
+          },
+          phoneNumbers: {
+            primaryPhone: locationData.profile?.phoneNumbers?.primaryPhone || ''
+          },
+          websiteUri: locationData.websiteUri || locationData.profile?.websiteUri || '',
+          regularHours: locationData.regularHours || locationData.profile?.regularHours,
+          specialHours: locationData.specialHours || locationData.profile?.specialHours,
+          labels: locationData.labels || [],
+          adWordsLocationExtensions: locationData.adWordsLocationExtensions,
+          latlng: locationData.latlng,
+          openInfo: locationData.openInfo
+        };
+        
+        response = await this.mybusinessaccount.accounts.locations.create({
+          parent: accountName,
+          requestBody: businessProfileData,
+          auth: this.getAuthClient(),
+        });
+        
+        console.log('Location created successfully via Business Profile API:', response.data);
+        return response.data;
+      }
+      
+      throw new Error('No available API for location creation');
+      
     } catch (error) {
       console.error('Error creating location:', error);
       

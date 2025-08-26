@@ -7,7 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 
 interface TestStoreData {
   storeName: string;
@@ -27,15 +30,30 @@ interface TestStoreData {
   description: string;
 }
 
+interface GoogleAccount {
+  name: string;
+  accountName: string;
+  type: string;
+  role: string;
+  state: string;
+  profilePhotoUri?: string;
+  accountNumber?: string;
+}
+
 export function GMBStoreTest() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [testResult, setTestResult] = useState<string>('');
-  const [accounts, setAccounts] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<GoogleAccount[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<string>('');
   const [isClient, setIsClient] = useState(false);
+  const [activeTab, setActiveTab] = useState('service-account');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userAccounts, setUserAccounts] = useState<GoogleAccount[]>([]);
+  const [selectedUserAccount, setSelectedUserAccount] = useState<string>('');
 
   const [testStoreData, setTestStoreData] = useState<TestStoreData>({
     storeName: 'Test Store - GMB API',
@@ -58,9 +76,126 @@ export function GMBStoreTest() {
   // Ensure component only runs on client side
   useEffect(() => {
     setIsClient(true);
+    checkGoogleAuthStatus();
+    checkUrlParameters();
   }, []);
 
-  // Test GMB API connection and get accounts
+  // Check URL parameters for authentication results
+  const checkUrlParameters = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const success = urlParams.get('success');
+    const error = urlParams.get('error');
+    
+    if (success) {
+      toast({
+        title: 'Authentication Successful',
+        description: success,
+      });
+      setTestResult(`✅ ${success}`);
+      
+      // Clear URL parameters
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      // Refresh auth status
+      checkGoogleAuthStatus();
+    }
+    
+    if (error) {
+      toast({
+        title: 'Authentication Failed',
+        description: error,
+        variant: 'destructive',
+      });
+      setTestResult(`❌ ${error}`);
+      
+      // Clear URL parameters
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  };
+
+  // Check if user is authenticated with Google
+  const checkGoogleAuthStatus = async () => {
+    try {
+      const response = await fetch('/api/google-business/auth/status');
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        setIsAuthenticated(result.isAuthenticated);
+        if (result.isAuthenticated) {
+          setUserProfile(result.userProfile);
+          await loadUserAccounts();
+        }
+      }
+    } catch (error) {
+      console.log('Auth status check failed:', error);
+    }
+  };
+
+  // Load user's Google accounts
+  const loadUserAccounts = async () => {
+    try {
+      const response = await fetch('/api/google-business/accounts?type=user');
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        setUserAccounts(result.accounts || []);
+        if (result.accounts && result.accounts.length > 0) {
+          setSelectedUserAccount(result.accounts[0].name);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load user accounts:', error);
+    }
+  };
+
+  // Authenticate with Google
+  const authenticateWithGoogle = async () => {
+    setLoading(true);
+    setTestResult('Redirecting to Google for authentication...');
+    
+    try {
+      // Redirect to Google OAuth
+      window.location.href = '/api/google-business/auth/login';
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
+      setTestResult(`❌ Google authentication failed: ${errorMessage}`);
+      setLoading(false);
+    }
+  };
+
+  // Disconnect Google account
+  const disconnectGoogle = async () => {
+    setLoading(true);
+    setTestResult('Disconnecting Google account...');
+    
+    try {
+      const response = await fetch('/api/google-business/auth/logout', {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        setIsAuthenticated(false);
+        setUserProfile(null);
+        setUserAccounts([]);
+        setSelectedUserAccount('');
+        setTestResult('✅ Google account disconnected successfully');
+        
+        toast({
+          title: 'Account Disconnected',
+          description: 'Google account has been disconnected',
+        });
+      } else {
+        throw new Error('Failed to disconnect account');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Disconnection failed';
+      setTestResult(`❌ Failed to disconnect: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Test GMB API connection and get accounts (Service Account)
   const testGMBConnection = async () => {
     setLoading(true);
     setTestResult('Testing GMB API connection...');
@@ -112,7 +247,9 @@ export function GMBStoreTest() {
 
   // Get locations for selected account
   const getLocations = async () => {
-    if (!selectedAccount) {
+    const accountName = activeTab === 'user-account' ? selectedUserAccount : selectedAccount;
+    
+    if (!accountName) {
       setTestResult('❌ Please select an account first');
       return;
     }
@@ -121,9 +258,9 @@ export function GMBStoreTest() {
     setTestResult('Fetching locations...');
     
     try {
-      console.log('Fetching locations for account:', selectedAccount);
+      console.log('Fetching locations for account:', accountName);
       
-      const response = await fetch(`/api/google-business/locations?accountName=${encodeURIComponent(selectedAccount)}`);
+      const response = await fetch(`/api/google-business/locations?accountName=${encodeURIComponent(accountName)}`);
       const result = await response.json();
       
       if (response.ok && result.success) {
@@ -166,7 +303,9 @@ export function GMBStoreTest() {
 
   // Test store creation in GMB
   const testStoreCreation = async () => {
-    if (!selectedAccount) {
+    const accountName = activeTab === 'user-account' ? selectedUserAccount : selectedAccount;
+    
+    if (!accountName) {
       setTestResult('❌ Please select an account first');
       return;
     }
@@ -177,7 +316,7 @@ export function GMBStoreTest() {
     try {
       console.log('Testing store creation with data:', testStoreData);
       
-      // Prepare GMB location data
+      // Transform test data to match GoogleBusinessLocation interface
       const gmbLocationData = {
         locationName: testStoreData.storeName,
         primaryCategory: {
@@ -211,7 +350,7 @@ export function GMBStoreTest() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          accountName: selectedAccount,
+          accountName: accountName,
           locationData: gmbLocationData,
           action: 'create' // or 'update'
         }),
@@ -251,7 +390,9 @@ export function GMBStoreTest() {
 
   // Test actual store creation API endpoint
   const testStoreCreationAPI = async () => {
-    if (!selectedAccount) {
+    const accountName = activeTab === 'user-account' ? selectedUserAccount : selectedAccount;
+    
+    if (!accountName) {
       setTestResult('❌ Please select an account first');
       return;
     }
@@ -275,7 +416,7 @@ export function GMBStoreTest() {
         description: testStoreData.description,
         googleBusiness: {
           isConnected: true,
-          accountId: selectedAccount,
+          accountId: accountName,
           locationId: null // Will be set after creation
         }
       };
@@ -425,266 +566,401 @@ export function GMBStoreTest() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Google My Business Store Creation Test</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Button 
-              onClick={testGMBConnection} 
-              disabled={loading}
-              className="w-full"
-            >
-              {loading ? 'Testing...' : 'Test GMB Connection'}
-            </Button>
-            
-            <Button 
-              onClick={getLocations} 
-              disabled={loading || !selectedAccount}
-              className="w-full"
-              variant="outline"
-            >
-              {loading ? 'Fetching...' : 'Get Locations'}
-            </Button>
-          </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="service-account">Service Account</TabsTrigger>
+          <TabsTrigger value="user-account">Google Account</TabsTrigger>
+          <TabsTrigger value="testing">Testing</TabsTrigger>
+        </TabsList>
 
-          {accounts.length > 0 && (
-            <div className="space-y-2">
-              <Label>Select GMB Account:</Label>
-              <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select an account" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map((account) => (
-                    <SelectItem key={account.name} value={account.name}>
-                      {account.accountName} ({account.type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+        {/* Service Account Tab */}
+        <TabsContent value="service-account" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Service Account GMB Testing</CardTitle>
+              <p className="text-sm text-gray-600">
+                Test GMB API using service account credentials (configured in environment variables)
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Button 
+                  onClick={testGMBConnection} 
+                  disabled={loading}
+                  className="w-full"
+                >
+                  {loading ? 'Testing...' : 'Test GMB Connection'}
+                </Button>
+                
+                <Button 
+                  onClick={getLocations} 
+                  disabled={loading || !selectedAccount}
+                  className="w-full"
+                  variant="outline"
+                >
+                  {loading ? 'Fetching...' : 'Get Locations'}
+                </Button>
+              </div>
 
-          {locations.length > 0 && (
-            <div className="space-y-2">
-              <Label>Select Location:</Label>
-              <Select value={selectedLocation} onValueChange={setSelectedLocation}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a location" />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.map((location) => (
-                    <SelectItem key={location.name} value={location.name}>
-                      {location.locationName} ({location.primaryCategory?.displayName || 'No category'})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+              {accounts.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Select GMB Account:</Label>
+                  <Select value={selectedAccount} onValueChange={setSelectedAccount}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select an account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((account) => (
+                        <SelectItem key={account.name} value={account.name}>
+                          {account.accountName} ({account.type})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          {selectedLocation && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button 
-                onClick={testLocationRetrieval} 
-                disabled={loading}
-                className="w-full"
-                variant="outline"
-              >
-                {loading ? 'Testing...' : 'Test Location Retrieval'}
-              </Button>
-              
-              <Button 
-                onClick={testLocationInsights} 
-                disabled={loading}
-                className="w-full"
-                variant="outline"
-              >
-                {loading ? 'Testing...' : 'Test Location Insights'}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {/* Google Account Tab */}
+        <TabsContent value="user-account" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Google Account Authentication</CardTitle>
+              <p className="text-sm text-gray-600">
+                Connect your personal Google account to manage GMB locations
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!isAuthenticated ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-blue-800 text-sm">
+                      Connect your Google account to access and manage your Google My Business locations.
+                    </p>
+                  </div>
+                  
+                  <Button 
+                    onClick={authenticateWithGoogle} 
+                    disabled={loading}
+                    className="w-full"
+                    size="lg"
+                  >
+                    {loading ? 'Connecting...' : '🔐 Connect Google Account'}
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                          <span className="text-green-600 font-semibold">
+                            {userProfile?.email?.charAt(0).toUpperCase() || 'G'}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-green-800">
+                            {userProfile?.email || 'Google Account'}
+                          </p>
+                          <p className="text-sm text-green-600">
+                            Connected to Google My Business
+                          </p>
+                        </div>
+                      </div>
+                      <Badge variant="secondary" className="bg-green-100 text-green-800">
+                        Connected
+                      </Badge>
+                    </div>
+                  </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Test Store Data</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Store Name:</Label>
-              <Input
-                value={testStoreData.storeName}
-                onChange={(e) => setTestStoreData(prev => ({ ...prev, storeName: e.target.value }))}
-                placeholder="Test Store Name"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Store Code:</Label>
-              <Input
-                value={testStoreData.storeCode}
-                onChange={(e) => setTestStoreData(prev => ({ ...prev, storeCode: e.target.value }))}
-                placeholder="GMB-TEST-001"
-              />
-            </div>
-          </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Button 
+                      onClick={loadUserAccounts} 
+                      disabled={loading}
+                      className="w-full"
+                      variant="outline"
+                    >
+                      {loading ? 'Loading...' : '🔄 Refresh Accounts'}
+                    </Button>
+                    
+                    <Button 
+                      onClick={disconnectGoogle} 
+                      disabled={loading}
+                      className="w-full"
+                      variant="destructive"
+                    >
+                      {loading ? 'Disconnecting...' : '❌ Disconnect Account'}
+                    </Button>
+                  </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Primary Category:</Label>
-              <Input
-                value={testStoreData.primaryCategory}
-                onChange={(e) => setTestStoreData(prev => ({ ...prev, primaryCategory: e.target.value }))}
-                placeholder="Restaurant"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Phone:</Label>
-              <Input
-                value={testStoreData.phone}
-                onChange={(e) => setTestStoreData(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="+1-555-123-4567"
-              />
-            </div>
-          </div>
+                  {userAccounts.length > 0 && (
+                    <div className="space-y-2">
+                      <Label>Select Your GMB Account:</Label>
+                      <Select value={selectedUserAccount} onValueChange={setSelectedUserAccount}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select an account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {userAccounts.map((account) => (
+                            <SelectItem key={account.name} value={account.name}>
+                              {account.accountName} ({account.type})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
-          <div className="space-y-2">
-            <Label>Website:</Label>
-            <Input
-              value={testStoreData.website}
-              onChange={(e) => setTestStoreData(prev => ({ ...prev, website: e.target.value }))}
-              placeholder="https://teststore.example.com"
-            />
-          </div>
+                  {selectedUserAccount && (
+                    <Button 
+                      onClick={getLocations} 
+                      disabled={loading}
+                      className="w-full"
+                      variant="outline"
+                    >
+                      {loading ? 'Fetching...' : '📍 Get My Locations'}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-          <div className="space-y-2">
-            <Label>Description:</Label>
-            <Textarea
-              value={testStoreData.description}
-              onChange={(e) => setTestStoreData(prev => ({ ...prev, description: e.target.value }))}
-              placeholder="Store description..."
-              rows={3}
-            />
-          </div>
+        {/* Testing Tab */}
+        <TabsContent value="testing" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Store Creation Testing</CardTitle>
+              <p className="text-sm text-gray-600">
+                Test creating stores in your selected GMB account
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {locations.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Select Location:</Label>
+                  <Select value={selectedLocation} onValueChange={setSelectedLocation}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {locations.map((location) => (
+                        <SelectItem key={location.name} value={location.name}>
+                          {location.locationName} ({location.primaryCategory?.displayName || 'No category'})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Address Line 1:</Label>
-              <Input
-                value={testStoreData.address.line1}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, line1: e.target.value }
-                }))}
-                placeholder="123 Test Street"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>City:</Label>
-              <Input
-                value={testStoreData.address.city}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, city: e.target.value }
-                }))}
-                placeholder="Test City"
-              />
-            </div>
-          </div>
+              {selectedLocation && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Button 
+                    onClick={testLocationRetrieval} 
+                    disabled={loading}
+                    className="w-full"
+                    variant="outline"
+                  >
+                    {loading ? 'Testing...' : 'Test Location Retrieval'}
+                  </Button>
+                  
+                  <Button 
+                    onClick={testLocationInsights} 
+                    disabled={loading}
+                    className="w-full"
+                    variant="outline"
+                  >
+                    {loading ? 'Testing...' : 'Test Location Insights'}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label>State:</Label>
-              <Input
-                value={testStoreData.address.state}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, state: e.target.value }
-                }))}
-                placeholder="TS"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Postal Code:</Label>
-              <Input
-                value={testStoreData.address.postalCode}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, postalCode: e.target.value }
-                }))}
-                placeholder="12345"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Country:</Label>
-              <Input
-                value={testStoreData.address.country}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, country: e.target.value }
-                }))}
-                placeholder="US"
-              />
-            </div>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Test Store Data</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Store Name:</Label>
+                  <Input
+                    value={testStoreData.storeName}
+                    onChange={(e) => setTestStoreData(prev => ({ ...prev, storeName: e.target.value }))}
+                    placeholder="Test Store Name"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Store Code:</Label>
+                  <Input
+                    value={testStoreData.storeCode}
+                    onChange={(e) => setTestStoreData(prev => ({ ...prev, storeCode: e.target.value }))}
+                    placeholder="GMB-TEST-001"
+                  />
+                </div>
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Latitude:</Label>
-              <Input
-                value={testStoreData.address.latitude}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, latitude: e.target.value }
-                }))}
-                placeholder="40.7128"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Longitude:</Label>
-              <Input
-                value={testStoreData.address.longitude}
-                onChange={(e) => setTestStoreData(prev => ({ 
-                  ...prev, 
-                  address: { ...prev.address, longitude: e.target.value }
-                }))}
-                placeholder="-74.0060"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Primary Category:</Label>
+                  <Input
+                    value={testStoreData.primaryCategory}
+                    onChange={(e) => setTestStoreData(prev => ({ ...prev, primaryCategory: e.target.value }))}
+                    placeholder="Restaurant"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Phone:</Label>
+                  <Input
+                    value={testStoreData.phone}
+                    onChange={(e) => setTestStoreData(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="+1-555-123-4567"
+                  />
+                </div>
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Button 
-              onClick={testStoreCreation} 
-              disabled={loading || !selectedAccount}
-              className="w-full"
-              size="lg"
-            >
-              {loading ? 'Testing Store Creation...' : 'Test Store Creation in GMB'}
-            </Button>
-            
-            <Button 
-              onClick={testStoreCreationAPI} 
-              disabled={loading || !selectedAccount}
-              className="w-full"
-              size="lg"
-              variant="outline"
-            >
-              {loading ? 'Testing API...' : 'Test Store Creation API'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+              <div className="space-y-2">
+                <Label>Website:</Label>
+                <Input
+                  value={testStoreData.website}
+                  onChange={(e) => setTestStoreData(prev => ({ ...prev, website: e.target.value }))}
+                  placeholder="https://teststore.example.com"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Description:</Label>
+                <Textarea
+                  value={testStoreData.description}
+                  onChange={(e) => setTestStoreData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Store description..."
+                  rows={3}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Address Line 1:</Label>
+                  <Input
+                    value={testStoreData.address.line1}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, line1: e.target.value }
+                    }))}
+                    placeholder="123 Test Street"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>City:</Label>
+                  <Input
+                    value={testStoreData.address.city}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, city: e.target.value }
+                    }))}
+                    placeholder="Test City"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>State:</Label>
+                  <Input
+                    value={testStoreData.address.state}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, state: e.target.value }
+                    }))}
+                    placeholder="TS"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Postal Code:</Label>
+                  <Input
+                    value={testStoreData.address.postalCode}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, postalCode: e.target.value }
+                    }))}
+                    placeholder="12345"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Country:</Label>
+                  <Input
+                    value={testStoreData.address.country}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, country: e.target.value }
+                    }))}
+                    placeholder="US"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Latitude:</Label>
+                  <Input
+                    value={testStoreData.address.latitude}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, latitude: e.target.value }
+                    }))}
+                    placeholder="40.7128"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Longitude:</Label>
+                  <Input
+                    value={testStoreData.address.longitude}
+                    onChange={(e) => setTestStoreData(prev => ({ 
+                      ...prev, 
+                      address: { ...prev.address, longitude: e.target.value }
+                    }))}
+                    placeholder="-74.0060"
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Button 
+                  onClick={testStoreCreation} 
+                  disabled={loading || (!selectedAccount && !selectedUserAccount)}
+                  className="w-full"
+                  size="lg"
+                >
+                  {loading ? 'Testing Store Creation...' : '🚀 Create Store in GMB'}
+                </Button>
+                
+                <Button 
+                  onClick={testStoreCreationAPI} 
+                  disabled={loading || (!selectedAccount && !selectedUserAccount)}
+                  className="w-full"
+                  size="lg"
+                  variant="outline"
+                >
+                  {loading ? 'Testing API...' : '🔌 Test Store Creation API'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {testResult && (
         <Card>
