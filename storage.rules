@@ -1,0 +1,45 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow public read access to all images
+    match /{allPaths=**} {
+      allow read: if true;
+      
+      // Allow authenticated users to upload images
+      allow write: if request.auth != null 
+        && request.resource.size < 5 * 1024 * 1024 // 5MB limit
+        && request.resource.contentType.matches('image/.*')
+        && request.resource.contentType in ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      
+      // Allow deletion by authenticated users
+      allow delete: if request.auth != null;
+    }
+    
+    // Specific rules for brand images
+    match /brands/{brandId}/{imageName} {
+      allow read: if true;
+      allow write: if request.auth != null 
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null;
+    }
+    
+    // Specific rules for store images
+    match /stores/{storeId}/{imageName} {
+      allow read: if true;
+      allow write: if request.auth != null 
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null;
+    }
+    
+    // Specific rules for general images
+    match /images/{imageName} {
+      allow read: if true;
+      allow write: if request.auth != null 
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null;
+    }
+  }
+}
