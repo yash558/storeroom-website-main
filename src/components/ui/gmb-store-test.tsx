@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { googleBusinessAPI } from '@/lib/google-business-api';
 
 interface TestStoreData {
   storeName: string;
@@ -36,6 +35,7 @@ export function GMBStoreTest() {
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [isClient, setIsClient] = useState(false);
 
   const [testStoreData, setTestStoreData] = useState<TestStoreData>({
     storeName: 'Test Store - GMB API',
@@ -55,6 +55,11 @@ export function GMBStoreTest() {
     description: 'This is a test store created via GMB API for validation purposes.'
   });
 
+  // Ensure component only runs on client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   // Test GMB API connection and get accounts
   const testGMBConnection = async () => {
     setLoading(true);
@@ -62,24 +67,33 @@ export function GMBStoreTest() {
     
     try {
       console.log('Testing GMB API connection...');
-      const gmbAccounts = await googleBusinessAPI.getAccounts();
       
-      if (gmbAccounts && gmbAccounts.length > 0) {
-        setAccounts(gmbAccounts);
-        setSelectedAccount(gmbAccounts[0].name);
-        setTestResult(`✅ GMB API connection successful! Found ${gmbAccounts.length} account(s):\n${gmbAccounts.map(acc => `- ${acc.accountName} (${acc.type})`).join('\n')}`);
+      // Call the API endpoint instead of importing the library directly
+      const response = await fetch('/api/google-business/accounts');
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        const gmbAccounts = result.accounts || [];
         
-        toast({
-          title: 'GMB Connection Successful',
-          description: `Found ${gmbAccounts.length} account(s)`,
-        });
+        if (gmbAccounts.length > 0) {
+          setAccounts(gmbAccounts);
+          setSelectedAccount(gmbAccounts[0].name);
+          setTestResult(`✅ GMB API connection successful! Found ${gmbAccounts.length} account(s):\n${gmbAccounts.map((acc: any) => `- ${acc.accountName} (${acc.type})`).join('\n')}`);
+          
+          toast({
+            title: 'GMB Connection Successful',
+            description: `Found ${gmbAccounts.length} account(s)`,
+          });
+        } else {
+          setTestResult('⚠️ GMB API connection successful but no accounts found. Please check your GMB setup.');
+          toast({
+            title: 'GMB Connection Warning',
+            description: 'No accounts found',
+            variant: 'destructive',
+          });
+        }
       } else {
-        setTestResult('⚠️ GMB API connection successful but no accounts found. Please check your GMB setup.');
-        toast({
-          title: 'GMB Connection Warning',
-          description: 'No accounts found',
-          variant: 'destructive',
-        });
+        throw new Error(result.error || 'Failed to fetch accounts');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -108,24 +122,32 @@ export function GMBStoreTest() {
     
     try {
       console.log('Fetching locations for account:', selectedAccount);
-      const gmbLocations = await googleBusinessAPI.getLocations(selectedAccount);
       
-      if (gmbLocations && gmbLocations.length > 0) {
-        setLocations(gmbLocations);
-        setSelectedLocation(gmbLocations[0].name);
-        setTestResult(`✅ Found ${gmbLocations.length} location(s):\n${gmbLocations.map(loc => `- ${loc.locationName} (${loc.primaryCategory?.displayName || 'No category'})`).join('\n')}`);
+      const response = await fetch(`/api/google-business/locations?accountName=${encodeURIComponent(selectedAccount)}`);
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        const gmbLocations = result.locations || [];
         
-        toast({
-          title: 'Locations Retrieved',
-          description: `Found ${gmbLocations.length} location(s)`,
-        });
+        if (gmbLocations.length > 0) {
+          setLocations(gmbLocations);
+          setSelectedLocation(gmbLocations[0].name);
+          setTestResult(`✅ Found ${gmbLocations.length} location(s):\n${gmbLocations.map((loc: any) => `- ${loc.locationName} (${loc.primaryCategory?.displayName || 'No category'})`).join('\n')}`);
+          
+          toast({
+            title: 'Locations Retrieved',
+            description: `Found ${gmbLocations.length} location(s)`,
+          });
+        } else {
+          setTestResult('⚠️ No locations found for this account. You may need to create a location first.');
+          toast({
+            title: 'No Locations Found',
+            description: 'This account has no locations',
+            variant: 'destructive',
+          });
+        }
       } else {
-        setTestResult('⚠️ No locations found for this account. You may need to create a location first.');
-        toast({
-          title: 'No Locations Found',
-          description: 'This account has no locations',
-          variant: 'destructive',
-        });
+        throw new Error(result.error || 'Failed to fetch locations');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -182,36 +204,35 @@ export function GMBStoreTest() {
         }
       };
 
-      let gmbLocation;
+      // Call the API endpoint for location creation
+      const response = await fetch('/api/google-business/locations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          accountName: selectedAccount,
+          locationData: gmbLocationData,
+          action: 'create' // or 'update'
+        }),
+      });
+
+      const result = await response.json();
       
-      // Try to create a new location first
-      try {
-        console.log('Attempting to create new location for account:', selectedAccount);
-        gmbLocation = await googleBusinessAPI.createLocation(selectedAccount, gmbLocationData);
+      if (response.ok && result.success) {
+        const gmbLocation = result.location;
         setTestResult(`✅ Store creation successful! New location created.\n\nLocation Details:\n- Name: ${gmbLocation.locationName}\n- ID: ${gmbLocation.name}\n- Category: ${gmbLocation.primaryCategory?.displayName}\n- Website: ${gmbLocation.websiteUri}\n- Phone: ${gmbLocation.profile?.phoneNumbers?.primaryPhone}\n- Coordinates: ${gmbLocation.latlng?.latitude}, ${gmbLocation.latlng?.longitude}`);
         
         toast({
           title: 'Store Creation Successful',
           description: 'New GMB location created successfully',
         });
-      } catch (createError) {
-        console.log('Location creation failed, trying update instead:', createError);
-        
-        // If creation fails, try to update an existing location
-        const testLocationName = `${selectedAccount}/locations/${testStoreData.storeCode}`;
-        console.log('Attempting to update existing location:', testLocationName);
-        
-        gmbLocation = await googleBusinessAPI.updateLocation(testLocationName, gmbLocationData);
-        setTestResult(`✅ Store update successful! Existing location updated.\n\nLocation Details:\n- Name: ${gmbLocation.locationName}\n- Category: ${gmbLocation.primaryCategory?.displayName}\n- Website: ${gmbLocation.websiteUri}\n- Phone: ${gmbLocation.profile?.phoneNumbers?.primaryPhone}\n- Coordinates: ${gmbLocation.latlng?.latitude}, ${gmbLocation.latlng?.longitude}`);
-        
-        toast({
-          title: 'Store Update Successful',
-          description: 'GMB location updated successfully',
-        });
-      }
 
-      // Refresh locations list
-      await getLocations();
+        // Refresh locations list
+        await getLocations();
+      } else {
+        throw new Error(result.error || 'Failed to create location');
+      }
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -308,14 +329,22 @@ export function GMBStoreTest() {
     
     try {
       console.log('Testing location retrieval for:', selectedLocation);
-      const location = await googleBusinessAPI.getLocation(selectedLocation);
       
-      setTestResult(`✅ Location retrieval successful!\n\nLocation Details:\n- Name: ${location.locationName}\n- Category: ${location.primaryCategory?.displayName}\n- Website: ${location.websiteUri}\n- Phone: ${location.profile?.phoneNumbers?.primaryPhone}\n- Description: ${location.profile?.description}\n- Coordinates: ${location.latlng?.latitude}, ${location.latlng?.longitude}`);
+      const response = await fetch(`/api/google-business/locations?locationName=${encodeURIComponent(selectedLocation)}`);
+      const result = await response.json();
       
-      toast({
-        title: 'Location Retrieval Successful',
-        description: 'Location data retrieved successfully',
-      });
+      if (response.ok && result.success) {
+        const location = result.location;
+        setTestResult(`✅ Location retrieval successful!\n\nLocation Details:\n- Name: ${location.locationName}\n- Category: ${location.primaryCategory?.displayName}\n- Website: ${location.websiteUri}\n- Phone: ${location.profile?.phoneNumbers?.primaryPhone}\n- Description: ${location.profile?.description}\n- Coordinates: ${location.latlng?.latitude}, ${location.latlng?.longitude}`);
+        
+        toast({
+          title: 'Location Retrieval Successful',
+          description: 'Location data retrieved successfully',
+        });
+        
+      } else {
+        throw new Error(result.error || 'Failed to retrieve location');
+      }
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -349,14 +378,21 @@ export function GMBStoreTest() {
       const endDate = new Date().toISOString();
       const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       
-      const insights = await googleBusinessAPI.getLocationInsights(selectedLocation, startDate, endDate);
+      const response = await fetch(`/api/google-business/insights?locationName=${encodeURIComponent(selectedLocation)}&startDate=${startDate}&endDate=${endDate}`);
+      const result = await response.json();
       
-      setTestResult(`✅ Location insights successful!\n\nInsights Data:\n${JSON.stringify(insights, null, 2)}`);
-      
-      toast({
-        title: 'Location Insights Successful',
-        description: 'Insights data retrieved successfully',
-      });
+      if (response.ok && result.success) {
+        const insights = result.performance;
+        setTestResult(`✅ Location insights successful!\n\nInsights Data:\n${JSON.stringify(insights, null, 2)}`);
+        
+        toast({
+          title: 'Location Insights Successful',
+          description: 'Insights data retrieved successfully',
+        });
+        
+      } else {
+        throw new Error(result.error || 'Failed to retrieve insights');
+      }
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -372,6 +408,20 @@ export function GMBStoreTest() {
       setLoading(false);
     }
   };
+
+  // Don't render until client-side
+  if (!isClient) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+            <p>Loading GMB Test Component...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">

@@ -105,4 +105,92 @@ export async function PATCH(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { accountName, locationData, action = 'create' } = body;
+
+    if (!accountName) {
+      return NextResponse.json(
+        { error: 'Account name is required' }, 
+        { status: 400 }
+      );
+    }
+
+    if (!locationData) {
+      return NextResponse.json(
+        { error: 'Location data is required' }, 
+        { status: 400 }
+      );
+    }
+
+    // Prefer OAuth
+    const refreshToken = request.cookies.get('gbp_refresh_token')?.value;
+    const accessToken = request.cookies.get('gbp_access_token')?.value;
+    
+    if (refreshToken || accessToken) {
+      try {
+        googleBusinessAPI.setAuthMode('oauth');
+        if (refreshToken) {
+          googleBusinessAPI.setRefreshToken(refreshToken);
+        } else if (accessToken) {
+          googleBusinessAPI.setCredentials({ access_token: accessToken } as any);
+        }
+        
+        let result;
+        if (action === 'create') {
+          result = await googleBusinessAPI.createLocation(accountName, locationData);
+        } else {
+          // For update, we need to construct the location name
+          const locationName = `${accountName}/locations/${locationData.storeCode || 'new-location'}`;
+          result = await googleBusinessAPI.updateLocation(locationName, locationData);
+        }
+        
+        return NextResponse.json({ success: true, location: result });
+      } catch (oauthErr) {
+        console.error('OAuth location creation failed:', oauthErr);
+        // fall through to service account
+      }
+    }
+
+    // Fallback: service account
+    let result;
+    if (action === 'create') {
+      result = await googleBusinessServiceAccountAPI.createLocation(accountName, locationData);
+    } else {
+      // For update, we need to construct the location name
+      const locationName = `${accountName}/locations/${locationData.storeCode || 'new-location'}`;
+      result = await googleBusinessServiceAccountAPI.updateLocation(locationName, locationData);
+    }
+    
+    return NextResponse.json({ success: true, location: result });
+
+  } catch (error) {
+    console.error('Error creating/updating location:', error);
+    
+    // Provide more specific error messages
+    if ((error as any)?.response?.status === 400) {
+      return NextResponse.json(
+        { error: 'Invalid location data. Please check all required fields.' }, 
+        { status: 400 }
+      );
+    } else if ((error as any)?.response?.status === 403) {
+      return NextResponse.json(
+        { error: 'Permission denied. You may not have rights to create locations in this account.' }, 
+        { status: 403 }
+      );
+    } else if ((error as any)?.response?.status === 409) {
+      return NextResponse.json(
+        { error: 'Location already exists or conflicts with existing data.' }, 
+        { status: 409 }
+      );
+    } else {
+      return NextResponse.json(
+        { error: `Failed to create/update location: ${(error as any)?.message || 'Unknown error'}` }, 
+        { status: 500 }
+      );
+    }
+  }
 } 

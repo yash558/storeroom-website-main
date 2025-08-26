@@ -349,6 +349,38 @@ class GoogleBusinessServiceAccountAPI {
     }
   }
 
+  // Create a new location
+  async createLocation(accountName: string, locationData: Partial<GoogleBusinessLocation>) {
+    await this.initializeAPIs();
+    
+    try {
+      console.log('Creating new location for account:', accountName);
+      console.log('Location data:', locationData);
+      
+      const response = await this.mybusinessaccount.accounts.locations.create({
+        parent: accountName,
+        requestBody: locationData,
+        auth: this.serviceAccountClient
+      });
+      
+      console.log('Location created successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error creating location:', error);
+      
+      // Provide more specific error messages
+      if ((error as any)?.response?.status === 400) {
+        throw new Error('Invalid location data. Please check all required fields.');
+      } else if ((error as any)?.response?.status === 403) {
+        throw new Error('Permission denied. You may not have rights to create locations in this account.');
+      } else if ((error as any)?.response?.status === 409) {
+        throw new Error('Location already exists or conflicts with existing data.');
+      } else {
+        throw new Error(`Failed to create location: ${(error as any)?.message || 'Unknown error'}`);
+      }
+    }
+  }
+
   // Get location insights
   async getLocationInsights(locationName: string, startDate: string, endDate: string): Promise<GoogleBusinessInsights> {
     await this.initializeAPIs();
