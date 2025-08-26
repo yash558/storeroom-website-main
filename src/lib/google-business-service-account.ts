@@ -304,14 +304,30 @@ class GoogleBusinessServiceAccountAPI {
     await this.initializeAPIs();
     
     try {
-      const response = await this.mybusinessaccount.accounts.locations.list({
+      console.log('Fetching locations for account:', accountName);
+      
+      // Use the My Business Business Information API for locations
+      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      const response = await this.mybusinessbusinessinformation.accounts.locations.list({
         parent: accountName,
         auth: this.serviceAccountClient
       });
+      
+      console.log('Locations fetched successfully:', response.data);
       return response.data.locations || [];
     } catch (error) {
       console.error('Error fetching locations:', error);
-      throw new Error('Failed to fetch locations');
+      
+      // Provide more specific error messages
+      if ((error as any)?.response?.status === 400) {
+        throw new Error('Invalid account ID or parameters');
+      } else if ((error as any)?.response?.status === 403) {
+        throw new Error('Permission denied. You may not have rights to access this account.');
+      } else if ((error as any)?.response?.status === 404) {
+        throw new Error('Account not found or no locations exist.');
+      } else {
+        throw new Error(`Failed to fetch locations: ${(error as any)?.message || 'Unknown error'}`);
+      }
     }
   }
 
@@ -357,7 +373,9 @@ class GoogleBusinessServiceAccountAPI {
       console.log('Creating new location for account:', accountName);
       console.log('Location data:', locationData);
       
-      const response = await this.mybusinessaccount.accounts.locations.create({
+      // Use the My Business Business Information API for creating locations
+      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      const response = await this.mybusinessbusinessinformation.accounts.locations.create({
         parent: accountName,
         requestBody: locationData,
         auth: this.serviceAccountClient

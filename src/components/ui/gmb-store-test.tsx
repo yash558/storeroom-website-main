@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -316,7 +316,7 @@ export function GMBStoreTest() {
     try {
       console.log('Testing store creation with data:', testStoreData);
       
-      // Transform test data to match GoogleBusinessLocation interface
+      // Prepare GMB location data
       const gmbLocationData = {
         locationName: testStoreData.storeName,
         primaryCategory: {
@@ -970,6 +970,154 @@ export function GMBStoreTest() {
           <CardContent>
             <div className="p-4 bg-muted rounded-md">
               <pre className="text-sm whitespace-pre-wrap font-mono">{testResult}</pre>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Locations Display Section */}
+      {locations.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              📍 GMB Locations ({locations.length})
+              <Button 
+                onClick={getLocations} 
+                size="sm" 
+                variant="outline"
+                disabled={loading}
+              >
+                🔄 Refresh
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {locations.map((location, index) => (
+                <Card key={location.name || index} className="border-2">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center justify-between">
+                      <span>{location.locationName || 'Unnamed Location'}</span>
+                      <Badge variant={location.openInfo?.status === 'OPEN' ? 'default' : 'secondary'}>
+                        {location.openInfo?.status || 'UNKNOWN'}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      ID: {location.name} | Store Code: {location.storeCode || 'N/A'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Primary Category</Label>
+                          <p className="text-sm">
+                            {location.primaryCategory?.displayName || 'No category'}
+                          </p>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Phone</Label>
+                          <p className="text-sm">
+                            {location.profile?.phoneNumbers?.primaryPhone || 'No phone'}
+                          </p>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Website</Label>
+                          <p className="text-sm">
+                            {location.websiteUri || location.profile?.websiteUri || 'No website'}
+                          </p>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Description</Label>
+                          <p className="text-sm">
+                            {location.profile?.description || 'No description'}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Coordinates</Label>
+                          <p className="text-sm">
+                            {location.latlng ? 
+                              `${location.latlng.latitude}, ${location.latlng.longitude}` : 
+                              'No coordinates'
+                            }
+                          </p>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Labels</Label>
+                          <div className="flex flex-wrap gap-1">
+                            {location.labels && location.labels.length > 0 ? 
+                              location.labels.map((label, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs">
+                                  {label}
+                                </Badge>
+                              ))
+                              : 
+                              <span className="text-sm text-muted-foreground">No labels</span>
+                            }
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Categories</Label>
+                          <div className="flex flex-wrap gap-1">
+                            {location.categories && location.categories.length > 0 ? 
+                              location.categories.map((cat, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs">
+                                  {cat.displayName}
+                                </Badge>
+                              ))
+                              : 
+                              <span className="text-sm text-muted-foreground">No categories</span>
+                            }
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={location.openInfo?.status === 'OPEN' ? 'default' : 'secondary'}>
+                              {location.openInfo?.status || 'UNKNOWN'}
+                            </Badge>
+                            {location.openInfo?.canReopen && (
+                              <Badge variant="outline">Can Reopen</Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Map Preview */}
+                    {location.latlng && (
+                      <div className="mt-4 p-4 bg-muted rounded-md">
+                        <Label className="text-sm font-medium text-muted-foreground mb-2 block">Location on Map</Label>
+                        <div className="w-full h-48 bg-muted border rounded-md flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="text-2xl mb-2">📍</div>
+                            <p className="text-sm text-muted-foreground">
+                              {location.latlng.latitude}, {location.latlng.longitude}
+                            </p>
+                            <a 
+                              href={`https://www.google.com/maps?q=${location.latlng.latitude},${location.latlng.longitude}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:underline mt-2 inline-block"
+                            >
+                              View on Google Maps →
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </CardContent>
         </Card>

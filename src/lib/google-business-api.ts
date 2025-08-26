@@ -496,14 +496,30 @@ class GoogleBusinessAPI {
     await this.initializeAPIs();
     
     try {
-      const response = await this.mybusinessaccount.accounts.locations.list({
+      console.log('Fetching locations for account:', accountName);
+      
+      // Use the My Business Business Information API for locations
+      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      const response = await this.mybusinessbusinessinformation.accounts.locations.list({
         parent: accountName,
         auth: this.getAuthClient(),
       });
+      
+      console.log('Locations fetched successfully:', response.data);
       return response.data.locations || [];
     } catch (error) {
       console.error('Error fetching locations:', error);
-      throw new Error('Failed to fetch locations');
+      
+      // Provide more specific error messages
+      if ((error as any)?.response?.status === 400) {
+        throw new Error('Invalid account ID or parameters');
+      } else if ((error as any)?.response?.status === 403) {
+        throw new Error('Permission denied. You may not have rights to access this account.');
+      } else if ((error as any)?.response?.status === 404) {
+        throw new Error('Account not found or no locations exist.');
+      } else {
+        throw new Error(`Failed to fetch locations: ${(error as any)?.message || 'Unknown error'}`);
+      }
     }
   }
 
@@ -549,63 +565,16 @@ class GoogleBusinessAPI {
       console.log('Creating new location for account:', accountName);
       console.log('Location data:', locationData);
       
-      let response;
+      // Use the My Business Business Information API for creating locations
+      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      const response = await this.mybusinessbusinessinformation.accounts.locations.create({
+        parent: accountName,
+        requestBody: locationData,
+        auth: this.getAuthClient(),
+      });
       
-      // Try My Business API first (legacy)
-      if (this.mybusinessaccount && this.mybusinessaccount.accounts && this.mybusinessaccount.accounts.locations) {
-        try {
-          response = await this.mybusinessaccount.accounts.locations.create({
-            parent: accountName,
-            requestBody: locationData,
-            auth: this.getAuthClient(),
-          });
-          console.log('Location created successfully via My Business API:', response.data);
-          return response.data;
-        } catch (mbError) {
-          console.warn('My Business API failed, trying Business Profile API...', mbError);
-        }
-      }
-      
-      // Fallback to Business Profile API
-      if (this.mybusinessaccount && this.mybusinessaccount.accounts && this.mybusinessaccount.accounts.locations) {
-        // For Business Profile API, we need to use a different structure
-        const businessProfileData = {
-          title: locationData.locationName,
-          categories: {
-            primaryCategory: locationData.primaryCategory,
-            additionalCategories: locationData.categories?.filter(cat => cat.categoryId !== locationData.primaryCategory?.categoryId) || []
-          },
-          storefrontAddress: {
-            addressLines: [locationData.profile?.description || ''],
-            locality: '',
-            administrativeArea: '',
-            postalCode: '',
-            regionCode: ''
-          },
-          phoneNumbers: {
-            primaryPhone: locationData.profile?.phoneNumbers?.primaryPhone || ''
-          },
-          websiteUri: locationData.websiteUri || locationData.profile?.websiteUri || '',
-          regularHours: locationData.regularHours || locationData.profile?.regularHours,
-          specialHours: locationData.specialHours || locationData.profile?.specialHours,
-          labels: locationData.labels || [],
-          adWordsLocationExtensions: locationData.adWordsLocationExtensions,
-          latlng: locationData.latlng,
-          openInfo: locationData.openInfo
-        };
-        
-        response = await this.mybusinessaccount.accounts.locations.create({
-          parent: accountName,
-          requestBody: businessProfileData,
-          auth: this.getAuthClient(),
-        });
-        
-        console.log('Location created successfully via Business Profile API:', response.data);
-        return response.data;
-      }
-      
-      throw new Error('No available API for location creation');
-      
+      console.log('Location created successfully:', response.data);
+      return response.data;
     } catch (error) {
       console.error('Error creating location:', error);
       
