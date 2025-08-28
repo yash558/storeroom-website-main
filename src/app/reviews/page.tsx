@@ -69,13 +69,12 @@ import { addDays, format, parseISO, isAfter } from "date-fns"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
-import { reviews as allReviews } from "@/lib/mock-data"
 import { generateReviewReply } from "@/ai/flows/generate-review-reply"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
 
 
-const stores = Array.from(new Set(allReviews.map(r => r.store)));
+const stores = ['Store ID: 11007263269570993027']; // Real store from Google Business Profile
 
 const actionItems = [
     {
@@ -169,34 +168,11 @@ const StatusIcon = ({ status }: { status: string }) => {
   return <Circle className="h-4 w-4 text-muted-foreground" />;
 };
 
-const getFilteredInsights = (store?: string) => {
-    const filteredReviews = store ? allReviews.filter(r => r.store === store) : allReviews;
-    
-    const keywordCloud = filteredReviews.flatMap(r => r.tags).reduce((acc, tag) => {
-        acc[tag] = (acc[tag] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
-
-    const topComplaints = filteredReviews.flatMap(r => r.complaints).reduce((acc, complaint) => {
-        if(complaint) acc[complaint] = (acc[complaint] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
-
-    const productFeedback = filteredReviews.flatMap(r => r.feedback).reduce((acc, fb) => {
-        if(fb) acc[fb] = (acc[fb] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
-
-    return {
-        keywordCloud: Object.entries(keywordCloud).sort((a, b) => b[1] - a[1]),
-        topComplaints: Object.entries(topComplaints).sort((a, b) => b[1] - a[1]),
-        productFeedback: Object.entries(productFeedback).sort((a, b) => b[1] - a[1]),
-    };
-};
+// This function will be defined inside the component after storeReviews is available
 
 
 export default function ReviewsPage() {
-  const [reviews, setReviews] = useState(allReviews);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [selectedStore, setSelectedStore] = useState<string | undefined>(undefined);
   const [replyText, setReplyText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -207,8 +183,7 @@ export default function ReviewsPage() {
   const unrepliedReviews = useMemo(() => reviews.filter(r => r.status === 'Not Replied'), [reviews]);
   const [selectedReview, setSelectedReview] = useState<(typeof unrepliedReviews)[0] | null>(unrepliedReviews[0] || null);
   
-  const insights = useMemo(() => getFilteredInsights(selectedStore), [selectedStore]);
-   const [date, setDate] = useState<DateRange | undefined>({
+  const [date, setDate] = useState<DateRange | undefined>({
     from: addDays(new Date(), -30),
     to: new Date(),
   })
@@ -243,6 +218,35 @@ export default function ReviewsPage() {
   const [storeReviewsLoading, setStoreReviewsLoading] = useState(false);
   const [storeReviewsError, setStoreReviewsError] = useState<string | null>(null);
   const [storeStats, setStoreStats] = useState<{totalReviews: number, averageRating?: string} | null>(null);
+
+  // Define getFilteredInsights function after storeReviews is available
+  const getFilteredInsights = (store?: string) => {
+    // Use storeReviews instead of allReviews for real data
+    const filteredReviews = store ? storeReviews.filter(r => r.store === store) : storeReviews;
+    
+    const keywordCloud = filteredReviews.flatMap(r => r.tags || []).reduce((acc, tag) => {
+        acc[tag] = (acc[tag] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    const topComplaints = filteredReviews.flatMap(r => r.complaints || []).reduce((acc, complaint) => {
+        if(complaint) acc[complaint] = (acc[complaint] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    const productFeedback = filteredReviews.flatMap(r => r.feedback || []).reduce((acc, fb) => {
+        if(fb) acc[fb] = (acc[fb] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    return {
+        keywordCloud: Object.entries(keywordCloud).sort((a, b) => b[1] - a[1]),
+        topComplaints: Object.entries(topComplaints).sort((a, b) => b[1] - a[1]),
+        productFeedback: Object.entries(productFeedback).sort((a, b) => b[1] - a[1]),
+    };
+  };
+  
+  const insights = useMemo(() => getFilteredInsights(selectedStore), [selectedStore, storeReviews]);
 
   useEffect(() => setGbpReady(true), []);
 
@@ -400,12 +404,15 @@ export default function ReviewsPage() {
           reviewerName: review.reviewer?.displayName || 'Anonymous',
           reviewerProfilePhotoUrl: review.reviewer?.profilePhotoUrl || '',
           rating: mapStar(review.starRating),
+          text: review.comment || '', // Use 'text' for compatibility with existing UI
           comment: review.comment || '',
+          date: review.createTime || review.updateTime || new Date().toISOString(), // Use 'date' for compatibility
           createTime: review.createTime || new Date().toISOString(),
           updateTime: review.updateTime || review.createTime || new Date().toISOString(),
           source: 'Google Business Profile',
           status: 'Not Replied',
           store: `Store ID: 11007263269570993027`,
+          customer: review.reviewer?.displayName || 'Anonymous', // Use 'customer' for compatibility
           sentiment: mapStar(review.starRating) >= 4 ? 'Positive' : mapStar(review.starRating) <= 2 ? 'Negative' : 'Neutral',
           tags: [],
           complaints: null,
@@ -413,6 +420,7 @@ export default function ReviewsPage() {
         }));
         
         setStoreReviews(transformedReviews);
+        setReviews(transformedReviews); // Also set the main reviews state
       } else {
         // Handle error case
         setStoreStats({
@@ -420,6 +428,7 @@ export default function ReviewsPage() {
           averageRating: 'N/A'
         });
         setStoreReviews([]);
+        setReviews([]); // Also clear the main reviews state
       }
     } catch (e: any) {
       setStoreReviewsError(e?.message || 'Failed to load store reviews');
@@ -459,12 +468,15 @@ export default function ReviewsPage() {
           reviewerName: review.reviewer?.displayName || 'Anonymous',
           reviewerProfilePhotoUrl: review.reviewer?.profilePhotoUrl || '',
           rating: mapStar(review.starRating),
+          text: review.comment || '', // Use 'text' for compatibility with existing UI
           comment: review.comment || '',
+          date: review.createTime || review.updateTime || new Date().toISOString(), // Use 'date' for compatibility
           createTime: review.createTime || new Date().toISOString(),
           updateTime: review.updateTime || review.createTime || new Date().toISOString(),
           source: 'Google Business Profile',
           status: 'Not Replied',
           store: `Store ID: 11007263269570993027`,
+          customer: review.reviewer?.displayName || 'Anonymous', // Use 'customer' for compatibility
           sentiment: mapStar(review.starRating) >= 4 ? 'Positive' : mapStar(review.starRating) <= 2 ? 'Negative' : 'Neutral',
           tags: [],
           complaints: null,
@@ -472,6 +484,7 @@ export default function ReviewsPage() {
         }));
         
         setStoreReviews(transformedReviews);
+        setReviews(transformedReviews); // Also set the main reviews state
         setStoreReviewsError(null);
       } else {
         // Handle error case
@@ -480,6 +493,7 @@ export default function ReviewsPage() {
           averageRating: 'N/A'
         });
         setStoreReviews([]);
+        setReviews([]); // Also clear the main reviews state
         setStoreReviewsError(data.error || data.message || 'Direct API call failed');
       }
     } catch (e: any) {
@@ -493,7 +507,7 @@ export default function ReviewsPage() {
     const monthlyData: { [key: string]: { total: number; count: number } } = {};
 
     reviews.forEach(review => {
-      const month = format(parseISO(review.date), 'MMM');
+      const month = format(parseISO(review.date || review.createTime || review.updateTime || new Date().toISOString()), 'MMM');
       if (!monthlyData[month]) {
         monthlyData[month] = { total: 0, count: 0 };
       }
@@ -585,7 +599,7 @@ export default function ReviewsPage() {
     const bestPerformingStores = useMemo(() => {
         const storeStats: Record<string, { totalRating: number, reviewCount: number, name: string }> = {};
 
-        allReviews.forEach(review => {
+        storeReviews.forEach(review => {
             if (!storeStats[review.store]) {
                 storeStats[review.store] = { totalRating: 0, reviewCount: 0, name: review.store };
             }
@@ -600,12 +614,12 @@ export default function ReviewsPage() {
             }))
             .filter(store => store.avgRating >= 4.8 && store.reviewCount > 10)
             .sort((a, b) => b.avgRating - a.avgRating);
-    }, [allReviews]);
+    }, [storeReviews]);
 
     const atRiskStores = useMemo(() => {
         const sevenDaysAgo = addDays(new Date(), -7);
-        const recentNegativeReviews = allReviews.filter(review =>
-            review.sentiment === 'Negative' && isAfter(parseISO(review.date), sevenDaysAgo)
+        const recentNegativeReviews = storeReviews.filter(review =>
+            review.sentiment === 'Negative' && isAfter(parseISO(review.date || review.createTime || review.updateTime || new Date().toISOString()), sevenDaysAgo)
         );
 
         const storeNegativeCounts: Record<string, { count: number, name: string }> = {};
@@ -620,7 +634,7 @@ export default function ReviewsPage() {
         return Object.values(storeNegativeCounts)
             .filter(store => store.count > 2)
             .sort((a, b) => b.count - a.count);
-    }, [allReviews]);
+    }, [storeReviews]);
 
     const handleGenerateReport = () => {
         toast({

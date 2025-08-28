@@ -22,9 +22,7 @@ const SERVICE_ACCOUNT_CONFIG = SERVICE_ACCOUNT_JSON ?? {
 
 // Google Business API scopes (request only what's needed)
 const SCOPES = [
-  'https://www.googleapis.com/auth/business.manage',
-  'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/business.manage'
 ];
 
 export interface GoogleBusinessAccount {
@@ -249,8 +247,6 @@ class GoogleBusinessServiceAccountAPI {
   private serviceAccountClient: JWT;
   private mybusinessaccount: any;
   private mybusinessbusinessinformation: any;
-  private mybusinessnotifications: any;
-  private mybusinessverifications: any;
 
   constructor() {
     // Initialize service account client
@@ -261,41 +257,143 @@ class GoogleBusinessServiceAccountAPI {
     });
   }
 
-  // Initialize the API clients
+    // Initialize the API clients
   private async initializeAPIs() {
-    // Authorize the service account client
-    await this.serviceAccountClient.authorize();
-
-    if (!this.mybusinessaccount) {
-      this.mybusinessaccount = (google as any).mybusinessaccountmanagement({ version: 'v1', auth: this.serviceAccountClient });
-    }
-    
-    if (!this.mybusinessbusinessinformation) {
-      this.mybusinessbusinessinformation = (google as any).mybusinessbusinessinformation({ version: 'v1', auth: this.serviceAccountClient });
-    }
-
-    if (!this.mybusinessnotifications) {
-      this.mybusinessnotifications = (google as any).mybusinessnotifications({ version: 'v1', auth: this.serviceAccountClient });
-    }
-
-    if (!this.mybusinessverifications) {
-      this.mybusinessverifications = (google as any).mybusinessverifications({ version: 'v1', auth: this.serviceAccountClient });
+    try {
+      console.log('[Service Account] Initializing APIs...');
+      console.log('[Service Account] Service account config:', {
+        hasEmail: !!SERVICE_ACCOUNT_CONFIG.client_email,
+        hasPrivateKey: !!SERVICE_ACCOUNT_CONFIG.private_key,
+        hasProjectId: !!SERVICE_ACCOUNT_CONFIG.project_id,
+        email: SERVICE_ACCOUNT_CONFIG.client_email
+      });
+      
+      // Authorize the service account client
+      console.log('[Service Account] Authorizing service account client...');
+      await this.serviceAccountClient.authorize();
+      console.log('[Service Account] Service account authorized successfully');
+      
+      // Initialize only the APIs we actually need
+      if (!this.mybusinessaccount) {
+        console.log('[Service Account] Initializing mybusinessaccountmanagement API for accounts...');
+        try {
+          if ((google as any).mybusinessaccountmanagement) {
+            this.mybusinessaccount = (google as any).mybusinessaccountmanagement({ version: 'v1', auth: this.serviceAccountClient });
+            console.log('[Service Account] mybusinessaccountmanagement API initialized successfully');
+          } else {
+            throw new Error('mybusinessaccountmanagement API is not available');
+          }
+        } catch (apiError) {
+          console.error('[Service Account] Failed to initialize mybusinessaccountmanagement API:', apiError);
+          throw new Error(`Failed to initialize mybusinessaccountmanagement API: ${apiError}`);
+        }
+      }
+      
+      if (!this.mybusinessbusinessinformation) {
+        console.log('[Service Account] Initializing mybusinessbusinessinformation API for locations...');
+        try {
+          if ((google as any).mybusinessbusinessinformation) {
+            this.mybusinessbusinessinformation = (google as any).mybusinessbusinessinformation({ version: 'v1', auth: this.serviceAccountClient });
+            console.log('[Service Account] mybusinessbusinessinformation API initialized successfully');
+          } else {
+            throw new Error('mybusinessbusinessinformation API is not available');
+          }
+        } catch (apiError) {
+          console.error('[Service Account] Failed to initialize mybusinessbusinessinformation API:', apiError);
+          throw new Error(`Failed to initialize mybusinessbusinessinformation API: ${apiError}`);
+        }
+      }
+      
+      console.log('[Service Account] Required APIs initialized successfully');
+    } catch (error) {
+      console.error('[Service Account] Error initializing APIs:', error);
+      throw error;
     }
   }
 
   // Get all accounts
   async getAccounts(): Promise<GoogleBusinessAccount[]> {
-    await this.initializeAPIs();
-    
     try {
-      const response = await this.mybusinessaccount.accounts.list({
-        auth: this.serviceAccountClient
-      });
-      return response.data.accounts || [];
+      console.log('[Service Account] Attempting to fetch accounts...');
+      
+      // Try the Google client library first
+      try {
+        await this.initializeAPIs();
+        
+        console.log('[Service Account] Service account client:', {
+          hasClient: !!this.serviceAccountClient,
+          email: this.serviceAccountClient?.email,
+          projectId: this.serviceAccountClient?.projectId
+        });
+        
+        const response = await this.mybusinessaccount.accounts.list({
+          auth: this.serviceAccountClient
+        });
+        
+        console.log('[Service Account] Accounts response:', response.data);
+        return response.data.accounts || [];
+      } catch (clientError) {
+        console.warn('[Service Account] Google client library failed, trying direct API call...', clientError);
+        
+        // Fallback to direct API call
+        return await this.getAccountsDirect();
+      }
     } catch (error) {
+      console.error('[Service Account] Error fetching accounts:', error);
       const details = (error as any)?.response?.data || (error as any)?.message || String(error);
-      console.error('Error fetching accounts:', details);
+      console.error('[Service Account] Error details:', details);
       throw new Error(`Failed to fetch Google Business accounts: ${typeof details === 'string' ? details : JSON.stringify(details)}`);
+    }
+  }
+
+  // Direct API call method for accounts
+  async getAccountsDirect(): Promise<GoogleBusinessAccount[]> {
+    try {
+      console.log('[Service Account] Making direct API call to fetch accounts...');
+      
+      // Get access token
+      const tokenResp = await this.serviceAccountClient.getAccessToken();
+      const accessToken = tokenResp?.token || tokenResp;
+      
+      if (!accessToken) {
+        throw new Error('Unable to acquire access token for Accounts API');
+      }
+
+      // Use the exact endpoint: https://mybusinessaccountmanagement.googleapis.com/v1/accounts
+      const url = 'https://mybusinessaccountmanagement.googleapis.com/v1/accounts';
+      
+      console.log('[Service Account] Calling accounts API:', url);
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Service Account] Accounts API error:', response.status, errorText);
+        
+        if (response.status === 400) {
+          throw new Error('Invalid request parameters');
+        } else if (response.status === 401) {
+          throw new Error('Authentication failed');
+        } else if (response.status === 403) {
+          throw new Error('Permission denied');
+        } else if (response.status === 404) {
+          throw new Error('Accounts not found');
+        } else {
+          throw new Error(`Accounts API error: ${response.status} ${errorText}`);
+        }
+      }
+
+      const data = await response.json();
+      console.log('[Service Account] Accounts fetched successfully via direct API:', data);
+      return data.accounts || [];
+    } catch (error) {
+      console.error('[Service Account] Error in direct API call:', error);
+      throw error;
     }
   }
 
@@ -307,9 +405,10 @@ class GoogleBusinessServiceAccountAPI {
       console.log('Fetching locations for account:', accountName);
       
       // Use the My Business Business Information API for locations
-      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      // Correct endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{ACCOUNT_ID}/locations?readMask=name,title
       const response = await this.mybusinessbusinessinformation.accounts.locations.list({
         parent: accountName,
+        readMask: 'name,title',
         auth: this.serviceAccountClient
       });
       
@@ -374,7 +473,7 @@ class GoogleBusinessServiceAccountAPI {
       console.log('Location data:', locationData);
       
       // Use the My Business Business Information API for creating locations
-      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{ACCOUNT_ID}/locations
       const response = await this.mybusinessbusinessinformation.accounts.locations.create({
         parent: accountName,
         requestBody: locationData,
@@ -395,6 +494,39 @@ class GoogleBusinessServiceAccountAPI {
         throw new Error('Location already exists or conflicts with existing data.');
       } else {
         throw new Error(`Failed to create location: ${(error as any)?.message || 'Unknown error'}`);
+      }
+    }
+  }
+
+  // Get location reviews (v4 My Business API)
+  async getLocationReviews(accountId: string, locationId: string): Promise<any[]> {
+    await this.initializeAPIs();
+    
+    try {
+      console.log('Fetching reviews for location:', locationId);
+      
+      // Use the My Business API v4 for reviews
+      // Endpoint: GET https://mybusiness.googleapis.com/v4/accounts/{ACCOUNT_ID}/locations/{LOCATION_ID}/reviews
+      // Note: Reviews require the location to be verified
+      const response = await this.mybusinessaccount.accounts.locations.reviews.list({
+        parent: `${accountId}/locations/${locationId}`,
+        auth: this.serviceAccountClient
+      });
+      
+      console.log('Reviews fetched successfully:', response.data);
+      return response.data.reviews || [];
+    } catch (error) {
+      console.error('Error fetching reviews:', error);
+      
+      // Provide specific error messages for reviews
+      if ((error as any)?.response?.status === 400) {
+        throw new Error('Invalid location ID or parameters');
+      } else if ((error as any)?.response?.status === 403) {
+        throw new Error('Permission denied or location not verified');
+      } else if ((error as any)?.response?.status === 404) {
+        throw new Error('Location not found');
+      } else {
+        throw new Error(`Failed to fetch reviews: ${(error as any)?.message || 'Unknown error'}`);
       }
     }
   }
@@ -522,37 +654,7 @@ class GoogleBusinessServiceAccountAPI {
     }
   }
 
-  // Get verification status
-  async getVerificationStatus(locationName: string): Promise<any> {
-    await this.initializeAPIs();
-    
-    try {
-      const response = await this.mybusinessverifications.accounts.locations.verifications.list({
-        parent: locationName,
-        auth: this.serviceAccountClient
-      });
-      return response.data.verifications || [];
-    } catch (error) {
-      console.error('Error fetching verification status:', error);
-      throw new Error('Failed to fetch verification status');
-    }
-  }
 
-  // Get notifications
-  async getNotifications(accountName: string): Promise<any[]> {
-    await this.initializeAPIs();
-    
-    try {
-      const response = await this.mybusinessnotifications.accounts.notifications.list({
-        parent: accountName,
-        auth: this.serviceAccountClient
-      });
-      return response.data.notifications || [];
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-      throw new Error('Failed to fetch notifications');
-    }
-  }
 
   // Performance API: fetch multiple daily metrics time series using service account
   async getLocationPerformanceMetrics(

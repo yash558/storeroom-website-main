@@ -3,9 +3,7 @@ import { OAuth2Client, JWT } from 'google-auth-library';
 
 // Google Business API scopes (request only what's needed)
 const SCOPES = [
-  'https://www.googleapis.com/auth/business.manage',
-  'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/userinfo.email'
+  'https://www.googleapis.com/auth/business.manage'
 ];
 
 // Prefer environment-based configuration. Supports either a full JSON blob or individual env vars.
@@ -250,8 +248,7 @@ class GoogleBusinessAPI {
   private serviceAccountClient: JWT;
   private mybusinessaccount: any;
   private mybusinessbusinessinformation: any;
-  private mybusinessnotifications: any;
-  private mybusinessverifications: any;
+  private mybusiness: any; // My Business v4 API client
   private authMode: 'oauth' | 'service_account' = 'service_account';
 
   constructor() {
@@ -307,12 +304,9 @@ class GoogleBusinessAPI {
       this.mybusinessbusinessinformation = (google as any).mybusinessbusinessinformation({ version: 'v1', auth: this.getAuthClient() });
     }
 
-    if (!this.mybusinessnotifications) {
-      this.mybusinessnotifications = (google as any).mybusinessnotifications({ version: 'v1', auth: this.getAuthClient() });
-    }
-
-    if (!this.mybusinessverifications) {
-      this.mybusinessverifications = (google as any).mybusinessverifications({ version: 'v1', auth: this.getAuthClient() });
+    // Initialize My Business v4 API client for reviews
+    if (!this.mybusiness) {
+      this.mybusiness = (google as any).mybusiness({ version: 'v4', auth: this.getAuthClient() });
     }
   }
 
@@ -322,8 +316,7 @@ class GoogleBusinessAPI {
     // Reset API clients to reinitialize with new auth
     this.mybusinessaccount = null;
     this.mybusinessbusinessinformation = null;
-    this.mybusinessnotifications = null;
-    this.mybusinessverifications = null;
+    this.mybusiness = null; // Reset My Business v4 client
   }
 
   // Get the current auth client
@@ -499,9 +492,10 @@ class GoogleBusinessAPI {
       console.log('Fetching locations for account:', accountName);
       
       // Use the My Business Business Information API for locations
-      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      // Correct endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{ACCOUNT_ID}/locations?readMask=name,title
       const response = await this.mybusinessbusinessinformation.accounts.locations.list({
         parent: accountName,
+        readMask: 'name,title',
         auth: this.getAuthClient(),
       });
       
@@ -566,7 +560,7 @@ class GoogleBusinessAPI {
       console.log('Location data:', locationData);
       
       // Use the My Business Business Information API for creating locations
-      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{accountId}/locations
+      // Endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{ACCOUNT_ID}/locations
       const response = await this.mybusinessbusinessinformation.accounts.locations.create({
         parent: accountName,
         requestBody: locationData,
@@ -588,6 +582,88 @@ class GoogleBusinessAPI {
       } else {
         throw new Error(`Failed to create location: ${(error as any)?.message || 'Unknown error'}`);
       }
+    }
+  }
+
+  // Get location reviews using My Business v4 API
+  async getLocationReviews(accountId: string, locationId: string): Promise<any[]> {
+    await this.initializeAPIs();
+    
+    try {
+      console.log('Fetching reviews for location:', locationId);
+      
+      // Use the My Business API v4 for reviews
+      // Correct endpoint: https://mybusiness.googleapis.com/v4/accounts/{ACCOUNT_ID}/locations/{LOCATION_ID}/reviews?orderBy=updateTime%20desc&pageSize=50
+      const response = await this.mybusiness.accounts.locations.reviews.list({
+        parent: `${accountId}/locations/${locationId}`,
+        orderBy: 'updateTime desc',
+        pageSize: 50,
+        auth: this.getAuthClient(),
+      });
+      
+      console.log('Reviews fetched successfully:', response.data);
+      return response.data.reviews || [];
+    } catch (error) {
+      console.error('Error fetching reviews:', error);
+      
+      // Provide specific error messages for reviews
+      if ((error as any)?.response?.status === 400) {
+        throw new Error('Invalid location ID or parameters');
+      } else if ((error as any)?.response?.status === 403) {
+        throw new Error('Permission denied or location not verified');
+      } else if ((error as any)?.response?.status === 404) {
+        throw new Error('Location not found');
+      } else {
+        throw new Error(`Failed to fetch reviews: ${(error as any)?.message || 'Unknown error'}`);
+      }
+    }
+  }
+
+  // Direct API call method for reviews using the exact endpoint
+  async getLocationReviewsDirect(accountId: string, locationId: string): Promise<any[]> {
+    try {
+      console.log('Fetching reviews directly for location:', locationId);
+      
+      // Get bearer token for current auth client
+      const tokenResp = await (this.getAuthClient() as any).getAccessToken();
+      const accessToken = tokenResp?.token || tokenResp;
+      if (!accessToken) {
+        throw new Error('Unable to acquire access token for Reviews API');
+      }
+
+      // Use the exact endpoint: https://mybusiness.googleapis.com/v4/accounts/{ACCOUNT_ID}/locations/{LOCATION_ID}/reviews?orderBy=updateTime%20desc&pageSize=50
+      const url = `https://mybusiness.googleapis.com/v4/accounts/${encodeURIComponent(accountId)}/locations/${encodeURIComponent(locationId)}/reviews?orderBy=updateTime%20desc&pageSize=50`;
+      
+      console.log('Calling reviews API:', url);
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Reviews API error:', response.status, errorText);
+        
+        if (response.status === 400) {
+          throw new Error('Invalid account ID or location ID');
+        } else if (response.status === 403) {
+          throw new Error('Permission denied or location not verified');
+        } else if (response.status === 404) {
+          throw new Error('Location not found');
+        } else {
+          throw new Error(`Reviews API error: ${response.status} ${errorText}`);
+        }
+      }
+
+      const data = await response.json();
+      console.log('Reviews fetched successfully via direct API:', data);
+      return data.reviews || [];
+    } catch (error) {
+      console.error('Error fetching reviews via direct API:', error);
+      throw error;
     }
   }
 
@@ -679,15 +755,28 @@ class GoogleBusinessAPI {
     }
   }
 
-  // Get reviews for a location
+  // Get reviews for a location (updated to use My Business v4)
   async getReviews(locationName: string): Promise<any[]> {
     await this.initializeAPIs();
     
     try {
-      const response = await this.mybusinessaccount.accounts.locations.reviews.list({
-        parent: locationName,
+      // Extract account ID and location ID from the location name
+      const match = locationName.match(/accounts\/([^\/]+)\/locations\/([^\/]+)/);
+      if (!match) {
+        throw new Error('Invalid location name format. Expected: accounts/{ACCOUNT_ID}/locations/{LOCATION_ID}');
+      }
+      
+      const accountId = match[1];
+      const locationId = match[2];
+      
+      // Use the My Business API v4 for reviews
+      const response = await this.mybusiness.accounts.locations.reviews.list({
+        parent: `${accountId}/locations/${locationId}`,
+        orderBy: 'updateTime desc',
+        pageSize: 50,
         auth: this.getAuthClient(),
       });
+      
       return response.data.reviews || [];
     } catch (error) {
       console.error('Error fetching reviews:', error);
@@ -695,12 +784,12 @@ class GoogleBusinessAPI {
     }
   }
 
-  // Reply to a review
+  // Reply to a review (updated to use My Business v4)
   async replyToReview(reviewName: string, comment: string): Promise<any> {
     await this.initializeAPIs();
     
     try {
-      const response = await this.mybusinessaccount.accounts.locations.reviews.updateReply({
+      const response = await this.mybusiness.accounts.locations.reviews.updateReply({
         name: reviewName,
         requestBody: {
           comment: comment
@@ -714,37 +803,7 @@ class GoogleBusinessAPI {
     }
   }
 
-  // Get verification status
-  async getVerificationStatus(locationName: string): Promise<any> {
-    await this.initializeAPIs();
-    
-    try {
-      const response = await this.mybusinessverifications.accounts.locations.verifications.list({
-        parent: locationName,
-        auth: this.getAuthClient(),
-      });
-      return response.data.verifications || [];
-    } catch (error) {
-      console.error('Error fetching verification status:', error);
-      throw new Error('Failed to fetch verification status');
-    }
-  }
 
-  // Get notifications
-  async getNotifications(accountName: string): Promise<any[]> {
-    await this.initializeAPIs();
-    
-    try {
-      const response = await this.mybusinessnotifications.accounts.notifications.list({
-        parent: accountName,
-        auth: this.getAuthClient(),
-      });
-      return response.data.notifications || [];
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-      throw new Error('Failed to fetch notifications');
-    }
-  }
 
   // Performance API: fetch multiple daily metrics time series
   // Docs: https://businessprofileperformance.googleapis.com/v1/locations/{locationId}:fetchMultiDailyMetricsTimeSeries
@@ -797,6 +856,54 @@ class GoogleBusinessAPI {
       throw new Error(`Performance API error: ${details}`);
     }
     return data;
+  }
+
+  // Direct API call method for locations using the exact endpoint
+  async getLocationsDirect(accountId: string): Promise<GoogleBusinessLocation[]> {
+    try {
+      console.log('Fetching locations directly for account:', accountId);
+      
+      // Get bearer token for current auth client
+      const tokenResp = await (this.getAuthClient() as any).getAccessToken();
+      const accessToken = tokenResp?.token || tokenResp;
+      if (!accessToken) {
+        throw new Error('Unable to acquire access token for Locations API');
+      }
+
+      // Use the exact endpoint: https://mybusinessbusinessinformation.googleapis.com/v1/accounts/{ACCOUNT_ID}/locations?readMask=name,title
+      const url = `https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${encodeURIComponent(accountId)}/locations?readMask=name,title`;
+      
+      console.log('Calling locations API:', url);
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Locations API error:', response.status, errorText);
+        
+        if (response.status === 400) {
+          throw new Error('Invalid account ID or parameters');
+        } else if (response.status === 403) {
+          throw new Error('Permission denied. You may not have rights to access this account.');
+        } else if (response.status === 404) {
+          throw new Error('Account not found or no locations exist.');
+        } else {
+          throw new Error(`Locations API error: ${response.status} ${errorText}`);
+        }
+      }
+
+      const data = await response.json();
+      console.log('Locations fetched successfully via direct API:', data);
+      return data.locations || [];
+    } catch (error) {
+      console.error('Error fetching locations via direct API:', error);
+      throw error;
+    }
   }
 }
 

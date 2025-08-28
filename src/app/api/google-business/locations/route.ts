@@ -126,6 +126,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Extract account ID from account name if it's in "accounts/{id}" format
+    let accountId = accountName;
+    if (accountName.startsWith('accounts/')) {
+      accountId = accountName.replace('accounts/', '');
+    } else if (!accountName.includes('/')) {
+      // If it's just a number, format it as accounts/{id}
+      accountId = `accounts/${accountName}`;
+    }
+
+    console.log('Processing location creation/update:', { 
+      originalAccountName: accountName, 
+      processedAccountId: accountId,
+      action 
+    });
+
     // Prefer OAuth
     const refreshToken = request.cookies.get('gbp_refresh_token')?.value;
     const accessToken = request.cookies.get('gbp_access_token')?.value;
@@ -141,10 +156,10 @@ export async function POST(request: NextRequest) {
         
         let result;
         if (action === 'create') {
-          result = await googleBusinessAPI.createLocation(accountName, locationData);
+          result = await googleBusinessAPI.createLocation(accountId, locationData);
         } else {
           // For update, we need to construct the location name
-          const locationName = `${accountName}/locations/${locationData.storeCode || 'new-location'}`;
+          const locationName = `${accountId}/locations/${locationData.storeCode || 'new-location'}`;
           result = await googleBusinessAPI.updateLocation(locationName, locationData);
         }
         
@@ -158,10 +173,10 @@ export async function POST(request: NextRequest) {
     // Fallback: service account
     let result;
     if (action === 'create') {
-      result = await googleBusinessServiceAccountAPI.createLocation(accountName, locationData);
+      result = await googleBusinessServiceAccountAPI.createLocation(accountId, locationData);
     } else {
       // For update, we need to construct the location name
-      const locationName = `${accountName}/locations/${locationData.storeCode || 'new-location'}`;
+      const locationName = `${accountId}/locations/${locationData.storeCode || 'new-location'}`;
       result = await googleBusinessServiceAccountAPI.updateLocation(locationName, locationData);
     }
     

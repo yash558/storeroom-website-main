@@ -126,10 +126,18 @@ export async function GET(request: NextRequest) {
       !!process.env.GOOGLE_CLIENT_EMAIL &&
       (!!process.env.GOOGLE_PRIVATE_KEY || !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
 
-      console.log("has Service Account", hasServiceAccount);
+    console.log('[GBP Accounts] Service account check:', {
+      hasServiceAccount,
+      hasClientEmail: !!process.env.GOOGLE_CLIENT_EMAIL,
+      hasPrivateKey: !!process.env.GOOGLE_PRIVATE_KEY,
+      hasServiceAccountJSON: !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
+      clientEmail: process.env.GOOGLE_CLIENT_EMAIL,
+      projectId: process.env.GOOGLE_PROJECT_ID
+    });
 
     if (hasServiceAccount) {
       try {
+        console.log('[GBP Accounts] Attempting to use service account API...');
         const accounts = await googleBusinessServiceAccountAPI.getAccounts();
         console.log('[GBP Accounts] Service account used; fetched accounts', { count: accounts?.length || 0 });
         return NextResponse.json({
@@ -137,6 +145,14 @@ export async function GET(request: NextRequest) {
           accounts,
         });
       } catch (saError: any) {
+        console.error('[GBP Accounts] Service account error details:', {
+          error: saError,
+          message: saError?.message,
+          response: saError?.response,
+          status: (saError?.response as any)?.status,
+          stack: saError?.stack
+        });
+        
         const status = (saError?.response as any)?.status;
         const details = saError?.message || (saError as any)?.toString?.() || 'Unknown error';
         console.warn('[GBP Accounts] Service account failed', { status, details });

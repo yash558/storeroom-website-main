@@ -195,6 +195,41 @@ export function GMBStoreTest() {
     }
   };
 
+  // Test Google APIs for debugging
+  const testGoogleAPIs = async () => {
+    setLoading(true);
+    setTestResult('Testing Google APIs...');
+    
+    try {
+      console.log('Testing Google APIs...');
+      
+      const response = await fetch('/api/google-business/test');
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        setTestResult('✅ Google APIs test completed. Check browser console and server logs for details.');
+        toast({
+          title: 'Google APIs Test',
+          description: 'Test completed successfully',
+        });
+      } else {
+        throw new Error(result.error || 'Failed to test Google APIs');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setTestResult(`❌ Google APIs test failed: ${errorMessage}`);
+      console.error('Google APIs test failed:', error);
+      
+      toast({
+        title: 'Google APIs Test Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Test GMB API connection and get accounts (Service Account)
   const testGMBConnection = async () => {
     setLoading(true);
@@ -601,6 +636,15 @@ export function GMBStoreTest() {
                   {loading ? 'Fetching...' : 'Get Locations'}
                 </Button>
               </div>
+              
+              <Button
+                onClick={testGoogleAPIs}
+                disabled={loading}
+                variant="secondary"
+                className="w-full"
+              >
+                Debug Google APIs
+              </Button>
 
               {accounts.length > 0 && (
                 <div className="space-y-2">
